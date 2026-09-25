@@ -1,73 +1,73 @@
 # github-mcp-agent
 
-MCP Server en Node.js + TypeScript que expone un catálogo de *tools* para automatizar operaciones de GitHub (crear repositorios, abrir issues, listar recursos y hacer commits reales), pensado para ser consumido por un agente de IA (LLM) desde **Antigravity** vía el protocolo MCP (Model Context Protocol).
+MCP Server built with Node.js + TypeScript that exposes a catalog of *tools* to automate GitHub operations (creating repositories, opening issues, listing resources, and making real commits), designed to be consumed by an AI agent (LLM) from **Antigravity** through the MCP (Model Context Protocol).
 
-El servidor no tiene interfaz gráfica propia ni base de datos: el "frontend" es el LLM que interpreta pedidos en lenguaje natural y decide qué tool invocar, y el "storage" es GitHub mismo.
+The server has no graphical interface or database of its own: the "frontend" is the LLM that interprets requests in natural language and decides which tool to invoke, while GitHub itself acts as the "storage".
 
-## Uso de IA en el desarrollo
+## AI Usage During Development
 
-Documentación completa y auditable del uso de IA durante este proyecto (bitácora, decisiones, preparación de la defensa): [carpeta de Google Drive](https://drive.google.com/drive/folders/1hySGV83Z9Fpu3wPlvTVSdCaUnRcKvEVt?usp=sharing).
-
----
-
-## Índice
-
-- [Uso de IA en el desarrollo](#uso-de-ia-en-el-desarrollo)
-- [¿Qué hace y por qué es útil?](#qué-hace-y-por-qué-es-útil)
-- [Arquitectura](#arquitectura)
-- [Requisitos](#requisitos)
-- [Instalación](#instalación)
-- [Obtener un GitHub Personal Access Token](#obtener-un-github-personal-access-token)
-- [Configurar las variables de entorno](#configurar-las-variables-de-entorno)
-- [Configurar el servidor en Antigravity](#configurar-el-servidor-en-antigravity)
-- [Tools disponibles](#tools-disponibles)
-- [Ejemplos de uso](#ejemplos-de-uso)
-- [Tests](#tests)
-- [Troubleshooting](#troubleshooting)
-- [Licencia](#licencia)
+Complete and auditable documentation of AI usage throughout this project (log, decisions, and defense preparation): [Google Drive folder](https://drive.google.com/drive/folders/1hySGV83Z9Fpu3wPlvTVSdCaUnRcKvEVt?usp=sharing).
 
 ---
 
-## ¿Qué hace y por qué es útil?
+## Table of Contents
 
-Le da a un agente de IA la capacidad de operar tu cuenta de GitHub usando lenguaje natural, en vez de que tengas que ejecutar comandos de `git`/`gh` o navegar la interfaz web a mano. Casos de uso típicos:
-
-- **Crear un repositorio nuevo** para arrancar un proyecto, sin salir del chat con el agente.
-- **Reportar o triagear issues** rápidamente, describiendo el problema en lenguaje natural.
-- **Revisar qué repositorios tenés** o qué issues están abiertos en uno puntual, sin abrir el navegador.
-- **Subir o actualizar un archivo** (por ejemplo un `README`, un `CHANGELOG`, un script) con un commit real, describiendo el cambio en texto.
-
-Cada acción devuelve **evidencia verificable** (una URL, un número de issue, un SHA de commit) para que puedas confirmar en GitHub que la operación efectivamente ocurrió — el agente actúa y deja rastro auditable, no solo sugiere.
+* [AI Usage During Development](#ai-usage-during-development)
+* [What Does It Do and Why Is It Useful?](#what-does-it-do-and-why-is-it-useful)
+* [Architecture](#architecture)
+* [Requirements](#requirements)
+* [Installation](#installation)
+* [Getting a GitHub Personal Access Token](#getting-a-github-personal-access-token)
+* [Configuring Environment Variables](#configuring-environment-variables)
+* [Configuring the Server in Antigravity](#configuring-the-server-in-antigravity)
+* [Available Tools](#available-tools)
+* [Usage Examples](#usage-examples)
+* [Tests](#tests)
+* [Troubleshooting](#troubleshooting)
+* [License](#license)
 
 ---
 
-## Arquitectura
+## What Does It Do and Why Is It Useful?
 
-```
+It gives an AI agent the ability to operate a GitHub account using natural language, instead of requiring the user to run `git`/`gh` commands or manually navigate the web interface. Typical use cases include:
+
+* **Creating a new repository** to start a project without leaving the agent's chat.
+* **Reporting or triaging issues** quickly by describing the problem in natural language.
+* **Checking existing repositories** or open issues in a specific repository without opening a browser.
+* **Uploading or updating a file** (such as a `README`, `CHANGELOG`, or script) through a real commit by describing the change in plain text.
+
+Each action returns **verifiable evidence** (a URL, issue number, or commit SHA) so the user can confirm on GitHub that the operation actually took place — the agent performs the action and leaves an auditable trail rather than simply making suggestions.
+
+---
+
+## Architecture
+
+```text
 ┌──────────────┐      ┌────────────────┐      ┌───────────────────┐      ┌─────────────────┐
-│  Antigravity │─────▶│  LLM            │─────▶│  MCP Server        │─────▶│  API de GitHub   │
-│  (Host)      │◀─────│  (Client)       │◀─────│  (este proyecto)   │◀─────│  (vía Octokit)   │
+│  Antigravity │─────▶│  LLM            │─────▶│  MCP Server        │─────▶│  GitHub API      │
+│  (Host)      │◀─────│  (Client)       │◀─────│  (this project)    │◀─────│  (via Octokit)   │
 └──────────────┘      └────────────────┘      └───────────────────┘      └─────────────────┘
-   gestiona la          interpreta el          expone las tools,           ejecuta la
-   sesión y conecta      pedido y decide        valida inputs con           operación real
-   los componentes       qué tool usar          Zod, ejecuta la             y devuelve el
-                         y con qué params        operación y                resultado
-                                                  traduce errores
+   manages the          interprets the          exposes the tools,          executes the
+   session and          request and decides    validates inputs with       actual operation
+   connects the         which tool to use      Zod, executes the            and returns the
+   components           and with which params  operation, and               result
+                                               translates errors
 ```
 
-La comunicación entre Antigravity y este servidor es exclusivamente por **stdio** (entrada/salida estándar del proceso), no por HTTP: Antigravity lanza el servidor como proceso hijo. Por eso `stdout` está reservado íntegramente al protocolo JSON-RPC 2.0 de MCP — todo el logging de diagnóstico va por `stderr`.
+Communication between Antigravity and this server takes place exclusively through **stdio** (standard input/output of the process), not HTTP: Antigravity launches the server as a child process. Therefore, `stdout` is entirely reserved for the MCP JSON-RPC 2.0 protocol — all diagnostic logging goes through `stderr`.
 
 ---
 
-## Requisitos
+## Requirements
 
-- **Node.js 18+** (desarrollado y probado con Node `24.16.0`; ver `.nvmrc`). Si usás `nvm`, `nvm use` toma la versión automáticamente.
-- Una cuenta de **GitHub** con posibilidad de generar un Personal Access Token (classic).
-- **Antigravity** instalado, si querés conectar el servidor a un LLM real (no es necesario para desarrollar o correr los tests).
+* **Node.js 18+** (developed and tested with Node `24.16.0`; see `.nvmrc`). If using `nvm`, `nvm use` automatically selects the required version.
+* A **GitHub** account with the ability to generate a Personal Access Token (classic).
+* **Antigravity** installed if you want to connect the server to a real LLM (not required for development or running the tests).
 
 ---
 
-## Instalación
+## Installation
 
 ```bash
 git clone https://github.com/ciro-castellaro/ProyectoM5-Ciro_Castellaro.git
@@ -76,205 +76,206 @@ npm install
 npm run build
 ```
 
-Scripts disponibles (`package.json`):
+Available scripts (`package.json`):
 
-| Script | Qué hace |
-|---|---|
-| `npm run build` | Compila TypeScript (`src/`) a JavaScript (`dist/`) |
-| `npm run dev` | Corre el servidor directo desde TypeScript con recarga automática (`tsx watch`) |
-| `npm start` | Corre la versión ya compilada (`node dist/server.js`) — la que usa Antigravity en producción |
-| `npm run test` | Corre la suite de tests con Vitest |
-
----
-
-## Obtener un GitHub Personal Access Token
-
-1. En GitHub: **Settings → Developer settings → Personal access tokens → Tokens (classic)**.
-2. **Generate new token (classic)**.
-3. Nombre descriptivo, por ejemplo `mcp-github-agent`.
-4. Scopes necesarios:
-   - **`repo`** — obligatorio. Es el que usan las 5 tools para leer/escribir repositorios, issues y commits.
-   - **`user`** — recomendado, información básica del usuario autenticado.
-   - **`admin:org`** — **no lo actives** salvo que necesites operar sobre organizaciones; no lo usa ninguna tool de este proyecto.
-5. Generá el token y **copialo de inmediato** — GitHub no lo vuelve a mostrar.
-
-> El token nunca debe pegarse en el código, en un commit, ni en la configuración de Antigravity en texto plano. Ver las dos secciones siguientes.
+| Script          | Description                                                                                       |
+| --------------- | ------------------------------------------------------------------------------------------------- |
+| `npm run build` | Compiles TypeScript (`src/`) to JavaScript (`dist/`)                                              |
+| `npm run dev`   | Runs the server directly from TypeScript with automatic reload (`tsx watch`)                      |
+| `npm start`     | Runs the compiled version (`node dist/server.js`) — the version used by Antigravity in production |
+| `npm run test`  | Runs the test suite with Vitest                                                                   |
 
 ---
 
-## Configurar las variables de entorno
+## Getting a GitHub Personal Access Token
 
-Copiá la plantilla y completá tu token:
+1. In GitHub, go to **Settings → Developer settings → Personal access tokens → Tokens (classic)**.
+2. Click **Generate new token (classic)**.
+3. Enter a descriptive name, for example `mcp-github-agent`.
+4. Required scopes:
+
+   * **`repo`** — required. Used by all 5 tools to read/write repositories, issues, and commits.
+   * **`user`** — recommended for basic information about the authenticated user.
+   * **`admin:org`** — **do not enable** unless you need to operate on organizations; none of the tools in this project use it.
+5. Generate the token and **copy it immediately** — GitHub will not display it again.
+
+> The token must never be pasted into the code, a commit, or the Antigravity configuration as plain text. See the following two sections.
+
+---
+
+## Configuring Environment Variables
+
+Copy the template and add your token:
 
 ```bash
 cp .env.example .env
 ```
 
-`.env` (nunca se commitea, está en `.gitignore`):
+`.env` (never committed; it is included in `.gitignore`):
 
-```
-GITHUB_TOKEN=ghp_tu_token_aca
+```text
+GITHUB_TOKEN=ghp_your_token_here
 LOG_LEVEL=info
 ```
 
-- `GITHUB_TOKEN`: el Personal Access Token del paso anterior.
-- `LOG_LEVEL`: `debug` | `info` | `warn` | `error` (opcional, default `info`). Todos los logs van por `stderr`, nunca por `stdout`.
+* `GITHUB_TOKEN`: the Personal Access Token generated in the previous step.
+* `LOG_LEVEL`: `debug` | `info` | `warn` | `error` (optional, default `info`). All logs are sent through `stderr`, never `stdout`.
 
-El servidor carga `.env` automáticamente con la carga nativa de Node (`process.loadEnvFile()`, sin dependencia `dotenv`). Si `.env` no existe, asume que las variables ya están definidas en el entorno del sistema (por ejemplo, cuando Antigravity las inyecta directamente).
+The server automatically loads `.env` using Node's native environment file loading (`process.loadEnvFile()`, with no `dotenv` dependency). If `.env` does not exist, it assumes that the variables are already defined in the system environment (for example, when Antigravity injects them directly).
 
 ---
 
-## Configurar el servidor en Antigravity
+## Configuring the Server in Antigravity
 
-En Antigravity: click en `...` en el panel del agente → **MCP Servers → Manage MCP Servers → View raw config** para abrir el archivo de configuración real de tu instalación (el nombre y la ubicación exacta pueden variar según versión/sistema operativo — no asumirlo, abrirlo y confirmarlo ahí). En Windows suele estar en `%userprofile%\.gemini\config\mcp_config.json`.
+In Antigravity, click `...` in the agent panel → **MCP Servers → Manage MCP Servers → View raw config** to open the actual configuration file used by your installation (the exact name and location may vary depending on the version and operating system — do not assume it; open it and verify it there). On Windows, it is usually located at `%userprofile%\.gemini\config\mcp_config.json`.
 
-Agregá la entrada del servidor:
+Add the server entry:
 
 ```json
 {
   "mcpServers": {
     "github-mcp-agent": {
       "command": "node",
-      "args": ["/ruta/absoluta/a/donde/clonaste/el/proyecto/dist/server.js"]
+      "args": ["/absolute/path/to/where/you/cloned/the/project/dist/server.js"]
     }
   }
 }
 ```
 
-Puntos clave:
+### Key Points
 
-- **`args` es una ruta absoluta que cada quien tiene que adaptar a su propia máquina** — `mcp_config.json` no es parte de este repositorio, vive en la instalación local de Antigravity de cada usuario. Si vos (u otra persona) clonaste el proyecto en, por ejemplo, `C:\Users\vos\proyectos\github-mcp-agent`, el `args` tiene que apuntar ahí, no a la ruta de otra persona. Esto es igual en cualquier MCP server (Claude Desktop, Cursor, etc.): el host necesita la ruta real del ejecutable en ese disco.
-- **Usar la build compilada** (`node dist/server.js`), no `npx tsx src/server.ts` — eso queda solo para desarrollo activo.
-- **No hace falta ningún bloque `env` en esta configuración.** El servidor carga su propio `GITHUB_TOKEN` directamente desde el `.env` del proyecto (`process.loadEnvFile()`, resuelto por la ubicación del propio archivo compilado, no por el directorio desde el que Antigravity lance el proceso) — alcanza con tener `.env` completo en la carpeta del proyecto, como se explicó arriba.
-- **Se probó explícitamente pasar el token vía interpolación `${GITHUB_TOKEN}` en un bloque `env`, apoyándose en una variable de entorno del sistema operativo, y no funcionó de forma confiable**: en pruebas reales, Antigravity no heredaba los cambios de esa variable hacia el proceso del servidor, ni cerrando/reabriendo la app ni con un reinicio completo de Windows. Por eso la configuración final evita depender del entorno del sistema por completo y usa únicamente el `.env` del proyecto, que sí se probó robusto sin importar cómo se lance el proceso.
-- Reiniciar Antigravity por completo (cerrar y volver a abrir) después de guardar `mcp_config.json` o de modificar el `.env`, para que el servidor arranque de cero y tome los cambios.
+* **`args` is an absolute path that must be adapted to each machine** — `mcp_config.json` is not part of this repository; it lives in each user's local Antigravity installation. If you (or someone else) cloned the project to, for example, `C:\Users\you\projects\github-mcp-agent`, `args` must point there, not to another person's path. This is the same for any MCP server (Claude Desktop, Cursor, etc.): the host needs the actual path to the executable on that disk.
+* **Use the compiled build** (`node dist/server.js`), not `npx tsx src/server.ts` — the latter is only intended for active development.
+* **No `env` block is required in this configuration.** The server loads its own `GITHUB_TOKEN` directly from the project's `.env` file (`process.loadEnvFile()`, resolved based on the location of the compiled file itself rather than the directory from which Antigravity launches the process). Having a complete `.env` file in the project folder is enough, as explained above.
+* **Passing the token through `${GITHUB_TOKEN}` interpolation in an `env` block was explicitly tested and was not reliable** when relying on an operating-system environment variable: in real-world testing, Antigravity did not consistently pass changes to that variable to the server process, even after closing/reopening the application or performing a full Windows restart. Therefore, the final configuration avoids relying on the system environment entirely and uses only the project's `.env`, which was tested to be reliable regardless of how the process is launched.
+* Completely restart Antigravity (close and reopen it) after saving `mcp_config.json` or modifying `.env`, so the server starts from scratch and picks up the changes.
 
 ---
 
-## Tools disponibles
+## Available Tools
 
-Todas devuelven texto con evidencia verificable (URL, número, SHA) en caso de éxito, y un mensaje en lenguaje natural (sin stack traces ni datos sensibles) en caso de error.
+All tools return text containing verifiable evidence (URL, number, SHA) upon success, and a natural-language message (without stack traces or sensitive data) in case of an error.
 
 ### `create_repository`
 
-Crea un nuevo repositorio en la cuenta autenticada (con un README inicial, para que quede listo para usar `create_commit` de inmediato).
+Creates a new repository in the authenticated account, including an initial README so it is ready to use `create_commit` immediately.
 
-| Parámetro | Tipo | Obligatorio | Notas |
-|---|---|---|---|
-| `name` | string | Sí | 3–100 caracteres, solo letras/números/puntos/guiones/guiones bajos |
-| `description` | string | No | hasta 350 caracteres |
-| `private` | boolean | No | default `false` |
+| Parameter     | Type    | Required | Notes                                                           |
+| ------------- | ------- | -------- | --------------------------------------------------------------- |
+| `name`        | string  | Yes      | 3–100 characters, letters/numbers/dots/hyphens/underscores only |
+| `description` | string  | No       | Up to 350 characters                                            |
+| `private`     | boolean | No       | Default `false`                                                 |
 
-**Ejemplo de prompt:** *"Creá un repositorio público llamado `demo-api` con la descripción 'API de prueba para el curso'."*
+**Example prompt:** *"Create a public repository called `demo-api` with the description 'Test API for the course'."*
 
 ### `create_issue`
 
-Abre un issue en un repositorio existente.
+Opens an issue in an existing repository.
 
-| Parámetro | Tipo | Obligatorio | Notas |
-|---|---|---|---|
-| `owner` | string | Sí | dueño del repositorio |
-| `repo` | string | Sí | nombre del repositorio |
-| `title` | string | Sí | hasta 256 caracteres |
-| `body` | string | No | descripción del issue |
-| `labels` | string[] | No | sin duplicados, hasta 100 |
-| `assignees` | string[] | No | hasta 10 |
-| `milestone` | number | No | número entero positivo del milestone existente en el repo |
+| Parameter   | Type     | Required | Notes                                                       |
+| ----------- | -------- | -------- | ----------------------------------------------------------- |
+| `owner`     | string   | Yes      | Repository owner                                            |
+| `repo`      | string   | Yes      | Repository name                                             |
+| `title`     | string   | Yes      | Up to 256 characters                                        |
+| `body`      | string   | No       | Issue description                                           |
+| `labels`    | string[] | No       | No duplicates, up to 100                                    |
+| `assignees` | string[] | No       | Up to 10                                                    |
+| `milestone` | number   | No       | Positive integer of an existing milestone in the repository |
 
-**Ejemplo de prompt:** *"Abrí un issue en ciro-castellaro/demo-api con el título 'Agregar autenticación' explicando que falta el login con OAuth, y asignalo al milestone 3."*
+**Example prompt:** *"Open an issue in ciro-castellaro/demo-api titled 'Add authentication', explaining that OAuth login is missing, and assign it to milestone 3."*
 
 ### `list_repositories`
 
-Lista los repositorios del usuario autenticado.
+Lists the repositories of the authenticated user.
 
-| Parámetro | Tipo | Obligatorio | Notas |
-|---|---|---|---|
-| `page` | number | No | default `1` |
-| `perPage` | number | No | default `30`, máx. `100` |
-| `sort` | enum | No | `created` \| `updated` \| `pushed` \| `full_name`, default `updated` |
-| `direction` | enum | No | `asc` \| `desc`, default `desc` |
-| `type` | enum | No | `all` \| `owner` \| `member`, default `owner` |
+| Parameter   | Type   | Required | Notes                                                             |
+| ----------- | ------ | -------- | ----------------------------------------------------------------- |
+| `page`      | number | No       | Default `1`                                                       |
+| `perPage`   | number | No       | Default `30`, max. `100`                                          |
+| `sort`      | enum   | No       | `created` | `updated` | `pushed` | `full_name`, default `updated` |
+| `direction` | enum   | No       | `asc` | `desc`, default `desc`                                    |
+| `type`      | enum   | No       | `all` | `owner` | `member`, default `owner`                       |
 
-**Ejemplo de prompt:** *"Mostrame mis últimos 5 repositorios ordenados por fecha de actualización."*
+**Example prompt:** *"Show me my 5 most recent repositories sorted by update date."*
 
 ### `create_commit`
 
-Agrega o modifica un archivo en una rama existente, con el flujo de Git internals (blob → tree → commit → ref).
+Adds or modifies a file on an existing branch using the Git internals workflow (blob → tree → commit → ref).
 
-| Parámetro | Tipo | Obligatorio | Notas |
-|---|---|---|---|
-| `owner` | string | Sí | |
-| `repo` | string | Sí | |
-| `branch` | string | Sí | debe existir previamente |
-| `path` | string | Sí | ruta del archivo dentro del repo |
-| `content` | string | Sí | contenido completo del archivo |
-| `message` | string | Sí | mensaje del commit |
+| Parameter | Type   | Required | Notes                           |
+| --------- | ------ | -------- | ------------------------------- |
+| `owner`   | string | Yes      |                                 |
+| `repo`    | string | Yes      |                                 |
+| `branch`  | string | Yes      | Must already exist              |
+| `path`    | string | Yes      | File path inside the repository |
+| `content` | string | Yes      | Full file content               |
+| `message` | string | Yes      | Commit message                  |
 
-**Ejemplo de prompt:** *"Agregá un archivo CHANGELOG.md al repositorio ciro-castellaro/demo-api en la rama main con el contenido '# Changelog\n\n## v1.0.0 - Lanzamiento inicial' y el mensaje 'Add initial changelog'."*
+**Example prompt:** *"Add a CHANGELOG.md file to the ciro-castellaro/demo-api repository on the main branch with the content '# Changelog\n\n## v1.0.0 - Initial release' and the commit message 'Add initial changelog'."*
 
 ### `list_issues`
 
-Lista los issues (nunca pull requests, se excluyen automáticamente) de un repositorio puntual.
+Lists issues (never pull requests, which are automatically excluded) from a specific repository.
 
-| Parámetro | Tipo | Obligatorio | Notas |
-|---|---|---|---|
-| `owner` | string | Sí | |
-| `repo` | string | Sí | |
-| `state` | enum | No | `open` \| `closed` \| `all`, default `open` |
-| `labels` | string[] | No | |
-| `sort` | enum | No | `created` \| `updated` \| `comments`, default `created` |
-| `direction` | enum | No | `asc` \| `desc`, default `desc` |
-| `page` | number | No | default `1` |
-| `perPage` | number | No | default `30`, máx. `100` |
+| Parameter   | Type     | Required | Notes                                                 |
+| ----------- | -------- | -------- | ----------------------------------------------------- |
+| `owner`     | string   | Yes      |                                                       |
+| `repo`      | string   | Yes      |                                                       |
+| `state`     | enum     | No       | `open` | `closed` | `all`, default `open`             |
+| `labels`    | string[] | No       |                                                       |
+| `sort`      | enum     | No       | `created` | `updated` | `comments`, default `created` |
+| `direction` | enum     | No       | `asc` | `desc`, default `desc`                        |
+| `page`      | number   | No       | Default `1`                                           |
+| `perPage`   | number   | No       | Default `30`, max. `100`                              |
 
-**Ejemplo de prompt:** *"Mostrame los issues abiertos del repositorio ciro-castellaro/demo-api, ordenados por fecha de creación."*
+**Example prompt:** *"Show me the open issues in the ciro-castellaro/demo-api repository, sorted by creation date."*
 
 ### `ping`
 
-Tool de diagnóstico sin parámetros, responde `"pong"`. Sirve para confirmar que el servidor está conectado antes de usar las tools reales — no ejecuta ninguna operación contra GitHub.
+Diagnostic tool with no parameters that responds with `"pong"`. It is used to confirm that the server is connected before using the actual tools — it does not perform any operation against GitHub.
 
 ---
 
-## Ejemplos de uso
+## Usage Examples
 
-Evidencia real generada durante el desarrollo (verificado con MCP Inspector contra una cuenta de GitHub real):
+Real evidence generated during development (verified with MCP Inspector against a real GitHub account):
 
-```
+```text
 > create_repository { name: "mcp-agent-test", description: "..." }
-Repositorio creado: ciro-castellaro/mcp-agent-test (https://github.com/ciro-castellaro/mcp-agent-test). Visibilidad: publico.
+Repository created: ciro-castellaro/mcp-agent-test (https://github.com/ciro-castellaro/mcp-agent-test). Visibility: public.
 
 > create_issue { owner: "ciro-castellaro", repo: "mcp-agent-test", title: "Test issue from MCP agent", body: "..." }
-Issue #1 creado: "Test issue from MCP agent" (https://github.com/ciro-castellaro/mcp-agent-test/issues/1).
+Issue #1 created: "Test issue from MCP agent" (https://github.com/ciro-castellaro/mcp-agent-test/issues/1).
 
 > create_commit { owner: "ciro-castellaro", repo: "mcp-agent-test", branch: "main", path: "test-commit.md", content: "...", message: "Add test-commit.md via create_commit" }
-Commit creado: bb4bdf0bbb9c0bdf19ff58bed23483d1527e18ba — "Add test-commit.md via create_commit" (https://github.com/ciro-castellaro/mcp-agent-test/commit/bb4bdf0bbb9c0bdf19ff58bed23483d1527e18ba).
+Commit created: bb4bdf0bbb9c0bdf19ff58bed23483d1527e18ba — "Add test-commit.md via create_commit" (https://github.com/ciro-castellaro/mcp-agent-test/commit/bb4bdf0bbb9c0bdf19ff58bed23483d1527e18ba).
 
 > list_issues { owner: "ciro-castellaro", repo: "mcp-agent-test" }
 - #1 [open] Test issue from MCP agent — https://github.com/ciro-castellaro/mcp-agent-test/issues/1
 
 > list_repositories { perPage: 3 }
-- ciro-castellaro/ProyectoM5-Ciro_Castellaro (publico) — https://github.com/ciro-castellaro/ProyectoM5-Ciro_Castellaro
-- ciro-castellaro/mcp-agent-test (publico) — https://github.com/ciro-castellaro/mcp-agent-test
-- ciro-castellaro/ProyectoM2-Ciro_Castellaro (publico) — https://github.com/ciro-castellaro/ProyectoM2-Ciro_Castellaro
+- ciro-castellaro/ProyectoM5-Ciro_Castellaro (public) — https://github.com/ciro-castellaro/ProyectoM5-Ciro_Castellaro
+- ciro-castellaro/mcp-agent-test (public) — https://github.com/ciro-castellaro/mcp-agent-test
+- ciro-castellaro/ProyectoM2-Ciro_Castellaro (public) — https://github.com/ciro-castellaro/ProyectoM2-Ciro_Castellaro
 ```
 
-Un ejemplo de un input inválido, rechazado **sin** llamar a la API de GitHub:
+An example of invalid input rejected **without** calling the GitHub API:
 
-```
+```text
 > create_repository { name: "ab" }
 isError: true
-"El nombre del repositorio debe tener al menos 3 caracteres"
+"The repository name must contain at least 3 characters"
 ```
 
-Y de un error real de GitHub traducido a lenguaje natural:
+And an example of an actual GitHub error translated into natural language:
 
-```
-> list_issues { owner: "ciro-castellaro", repo: "este-repo-no-existe" }
+```text
+> list_issues { owner: "ciro-castellaro", repo: "this-repo-does-not-exist" }
 isError: true
-"El recurso solicitado no fue encontrado en GitHub. Verifica el owner y el nombre del repositorio."
+"The requested resource was not found on GitHub. Verify the owner and repository name."
 ```
 
-Podés probar cualquiera de estos directamente con **MCP Inspector**, sin necesidad de Antigravity:
+Any of these can be tested directly with **MCP Inspector**, without requiring Antigravity:
 
 ```bash
 npx @modelcontextprotocol/inspector --cli node dist/server.js --method tools/list
@@ -289,31 +290,31 @@ npx @modelcontextprotocol/inspector --cli node dist/server.js --method tools/cal
 npm run test
 ```
 
-47 tests con Vitest, deterministas, **sin ninguna llamada real a la API de GitHub** (el cliente de Octokit se mockea inyectándolo en el constructor de `GitHubClient`):
+47 Vitest tests, deterministic, **with no real calls to the GitHub API** (the Octokit client is mocked by injecting it into the `GitHubClient` constructor):
 
-- `tests/tools.test.ts` (24 tests) — validación de los 5 schemas de Zod: inputs válidos e inválidos, y casos de hardening (path traversal, límites de tamaño, formatos, duplicados).
-- `tests/github.test.ts` (9 tests) — las 5 operaciones de `GitHubClient` con Octokit mockeado, incluyendo casos de error (repositorio inexistente, credenciales inválidas) y el comportamiento de reintento ante errores recuperables.
-- `tests/errors.test.ts` (14 tests) — clasificación y traducción de errores (400/401/403/404/422/429/5xx) a mensajes en lenguaje natural, y sanitización de mensajes externos.
+* `tests/tools.test.ts` (24 tests) — validation of the 5 Zod schemas: valid and invalid inputs, plus hardening cases (path traversal, size limits, formats, duplicates).
+* `tests/github.test.ts` (9 tests) — the 5 `GitHubClient` operations with Octokit mocked, including error cases (non-existent repository, invalid credentials) and retry behavior for recoverable errors.
+* `tests/errors.test.ts` (14 tests) — classification and translation of errors (400/401/403/404/422/429/5xx) into natural-language messages, and sanitization of external messages.
 
 ---
 
 ## Troubleshooting
 
-| Error / síntoma | Causa probable | Qué hacer |
-|---|---|---|
-| El servidor no arranca, log `GITHUB_TOKEN no esta configurado` | Falta `.env` en la carpeta del proyecto, o la línea `GITHUB_TOKEN=` está vacía | Verificar que `.env` existe junto a `package.json` y tiene `GITHUB_TOKEN=...` con un valor real |
-| `El token de GitHub es invalido o expiro` (401) | Token vencido, revocado, o mal copiado | Generar un nuevo Personal Access Token y actualizar `.env` |
-| Rotaste el token, actualizaste `.env`, pero Antigravity sigue devolviendo 401 con el token viejo (incluso después de cerrar y reabrir la app, o de reiniciar Windows) | Antigravity no relanzó realmente el proceso del servidor, o quedó una variable de entorno del sistema llamada `GITHUB_TOKEN` de una configuración anterior pisando el valor del `.env` (`.env` nunca sobreescribe una variable ya definida en el entorno) | Verificar que no exista una variable de entorno de sistema `GITHUB_TOKEN` residual (`[Environment]::GetEnvironmentVariable("GITHUB_TOKEN","User")` en PowerShell) y borrarla si aparece; confirmar el `.env` corriendo `node dist/server.js` directo en una terminal nueva (sin Antigravity) antes de volver a probar desde ahí |
-| `El token no tiene permisos suficientes` (403, no rate limit) | Al token le falta el scope `repo` | Regenerar el token con el scope `repo` activado |
-| `Se alcanzo el limite de solicitudes de la API de GitHub` (403, rate limit) | Se agotó el límite de requests de la API | Esperar al momento indicado por GitHub (`x-ratelimit-reset`); el servidor reintenta automáticamente hasta 3 veces |
-| `El recurso solicitado no fue encontrado en GitHub` (404) | `owner`/`repo` mal escrito, o el repo no existe/no es accesible con este token | Verificar el nombre exacto del owner y del repositorio |
-| `create_commit` falla aunque el repositorio existe | La rama indicada no existe todavía | Usar una rama existente (los repos creados con `create_repository` ya tienen `main` lista, gracias al README inicial) |
-| Antigravity no lista las tools | El servidor no está registrado correctamente, o falta reiniciar Antigravity | Confirmar la config en "View raw config", verificar que el `command`/`args` apunten a `dist/server.js`, y recargar Antigravity |
-| Antigravity se desconecta o tira errores de protocolo | Algo está escribiendo por `stdout` en vez de `stderr` | Revisar que no se haya agregado ningún `console.log` (todo el logging debe pasar por `utils/logging.ts`, que usa `console.error`) |
-| `npm run build` falla con `Cannot find name 'process'` | Falta el ajuste de tipos de Node en `tsconfig.json` | Ya está resuelto en este proyecto (`"types": ["node"]`); si aparece de nuevo, confirmar que `@types/node` esté instalado |
+| Error / Symptom                                                                                                                                             | Likely Cause                                                                                                                                                                                                                                         | What to Do                                                                                                                                                                                                                                                                                                          |
+| ----------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Server does not start, log `GITHUB_TOKEN is not configured`                                                                                                 | `.env` is missing from the project folder, or the `GITHUB_TOKEN=` line is empty                                                                                                                                                                      | Verify that `.env` exists next to `package.json` and contains `GITHUB_TOKEN=...` with a valid value                                                                                                                                                                                                                 |
+| `The GitHub token is invalid or has expired` (401)                                                                                                          | Token expired, revoked, or incorrectly copied                                                                                                                                                                                                        | Generate a new Personal Access Token and update `.env`                                                                                                                                                                                                                                                              |
+| You rotated the token and updated `.env`, but Antigravity still returns 401 with the old token (even after closing/reopening the app or restarting Windows) | Antigravity did not actually relaunch the server process, or a system environment variable named `GITHUB_TOKEN` from a previous configuration is overriding the `.env` value (`.env` never overwrites a variable already defined in the environment) | Check whether a residual system environment variable named `GITHUB_TOKEN` exists (`[Environment]::GetEnvironmentVariable("GITHUB_TOKEN","User")` in PowerShell) and remove it if present; confirm the `.env` by running `node dist/server.js` directly in a new terminal (without Antigravity) before testing again |
+| `The token does not have sufficient permissions` (403, not rate limit)                                                                                      | The token is missing the `repo` scope                                                                                                                                                                                                                | Regenerate the token with the `repo` scope enabled                                                                                                                                                                                                                                                                  |
+| `The GitHub API request limit has been reached` (403, rate limit)                                                                                           | The API request limit has been exhausted                                                                                                                                                                                                             | Wait until the time indicated by GitHub (`x-ratelimit-reset`); the server automatically retries up to 3 times                                                                                                                                                                                                       |
+| `The requested resource was not found on GitHub` (404)                                                                                                      | `owner`/`repo` is misspelled, or the repository does not exist/is not accessible with this token                                                                                                                                                     | Verify the exact owner and repository name                                                                                                                                                                                                                                                                          |
+| `create_commit` fails even though the repository exists                                                                                                     | The specified branch does not exist yet                                                                                                                                                                                                              | Use an existing branch (repositories created with `create_repository` already have `main` ready, thanks to the initial README)                                                                                                                                                                                      |
+| Antigravity does not list the tools                                                                                                                         | The server is not registered correctly, or Antigravity needs to be restarted                                                                                                                                                                         | Check the configuration in "View raw config", verify that `command`/`args` point to `dist/server.js`, and reload Antigravity                                                                                                                                                                                        |
+| Antigravity disconnects or reports protocol errors                                                                                                          | Something is writing to `stdout` instead of `stderr`                                                                                                                                                                                                 | Make sure no `console.log` has been added (all logging must go through `utils/logging.ts`, which uses `console.error`)                                                                                                                                                                                              |
+| `npm run build` fails with `Cannot find name 'process'`                                                                                                     | Node types are missing from `tsconfig.json`                                                                                                                                                                                                          | This is already configured in the project (`"types": ["node"]`); if the error appears again, confirm that `@types/node` is installed                                                                                                                                                                                |
 
 ---
 
-## Licencia
+## License
 
-MIT — ver [`LICENSE`](./LICENSE).
+MIT — see [`LICENSE`](./LICENSE).
