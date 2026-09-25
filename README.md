@@ -2,8 +2,6 @@
 
 MCP Server built with Node.js + TypeScript that exposes a catalog of *tools* to automate GitHub operations (creating repositories, opening issues, listing resources, and making real commits), designed to be consumed by an AI agent (LLM) from **Antigravity** through the MCP (Model Context Protocol).
 
-The server has no graphical interface or database of its own: the "frontend" is the LLM that interprets requests in natural language and decides which tool to invoke, while GitHub itself acts as the "storage".
-
 ## AI Usage During Development
 
 Complete and auditable documentation of AI usage throughout this project (log, decisions, and defense preparation): [Google Drive folder](https://drive.google.com/drive/folders/1hySGV83Z9Fpu3wPlvTVSdCaUnRcKvEVt?usp=sharing).
